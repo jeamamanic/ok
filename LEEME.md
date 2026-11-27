@@ -28,8 +28,6 @@ En la pestaña Actions, al terminar "Crear APK", descarga `SaltaCanciones-apk`.
   volumen, mantén el botón apretado o pulsa despacio.
 
 ## Agitar
-- Activa "Agitar para encender o apagar" y pulsa "Permitir apagar la pantalla".
-- Dos sacudidas fuertes encienden la pantalla; otras dos la apagan. No desbloquea el teléfono.
+- Activa "Agitar para la linterna".
+- Dos sacudidas fuertes encienden la linterna; otras dos la apagan.
 - Consume más batería y puede activarse al correr o llevarlo en el bolsillo.
-- Antes de desinstalar, pulsa "Quitar permiso para apagar pantalla".
-- Si no enciende, revisa que la app tenga permitido "Encender la pantalla".

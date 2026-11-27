@@ -2,30 +2,21 @@ package com.saltacanciones;
 
 import android.Manifest;
 import android.app.Activity;
-import android.app.admin.DevicePolicyManager;
-import android.content.ComponentName;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
 import android.os.Build;
 import android.os.Bundle;
-import android.widget.Button;
 import android.widget.LinearLayout;
 import android.widget.Switch;
 import android.widget.TextView;
 
 public class MainActivity extends Activity {
     private SharedPreferences prefs;
-    private DevicePolicyManager policy;
-    private ComponentName admin;
-    private Button adminButton;
-
     @Override
     protected void onCreate(Bundle state) {
         super.onCreate(state);
         prefs = getSharedPreferences("ajustes", MODE_PRIVATE);
-        policy = getSystemService(DevicePolicyManager.class);
-        admin = new ComponentName(this, LockAdmin.class);
 
         LinearLayout layout = new LinearLayout(this);
         layout.setOrientation(LinearLayout.VERTICAL);
@@ -34,22 +25,9 @@ public class MainActivity extends Activity {
 
         addSwitch(layout, "volumen", "Cambiar canción con el volumen",
                 "Con música: 2× subir = siguiente, 2× bajar = anterior");
-        addSwitch(layout, "agitar", "Agitar para encender o apagar",
-                "Agita 2 veces para encender la pantalla y otras 2 para apagarla");
+        addSwitch(layout, "agitar", "Agitar para la linterna",
+                "Agita 2 veces para encender la linterna y otras 2 para apagarla");
 
-        adminButton = new Button(this);
-        adminButton.setOnClickListener(v -> {
-            if (policy.isAdminActive(admin)) {
-                policy.removeActiveAdmin(admin);
-                adminButton.postDelayed(this::refreshAdmin, 500);
-            } else {
-                startActivity(new Intent(DevicePolicyManager.ACTION_ADD_DEVICE_ADMIN)
-                        .putExtra(DevicePolicyManager.EXTRA_DEVICE_ADMIN, admin)
-                        .putExtra(DevicePolicyManager.EXTRA_ADD_EXPLANATION,
-                                "Solo se usa para apagar la pantalla al agitar."));
-            }
-        });
-        layout.addView(adminButton);
         setContentView(layout);
 
         if (Build.VERSION.SDK_INT >= 33 && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS)
@@ -82,16 +60,9 @@ public class MainActivity extends Activity {
         }
     }
 
-    private void refreshAdmin() {
-        adminButton.setText(policy.isAdminActive(admin)
-                ? "Quitar permiso para apagar pantalla"
-                : "Permitir apagar la pantalla");
-    }
-
     @Override
     protected void onResume() {
         super.onResume();
-        refreshAdmin();
         updateService();
     }
 }

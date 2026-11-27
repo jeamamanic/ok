@@ -9,12 +9,13 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
 import android.content.SharedPreferences;
-import android.app.admin.DevicePolicyManager;
-import android.content.ComponentName;
 import android.hardware.Sensor;
 import android.hardware.SensorEvent;
 import android.hardware.SensorEventListener;
 import android.hardware.SensorManager;
+import android.hardware.camera2.CameraAccessException;
+import android.hardware.camera2.CameraCharacteristics;
+import android.hardware.camera2.CameraManager;
 import android.os.PowerManager;
 import android.content.pm.ServiceInfo;
 import android.media.AudioManager;
@@ -49,21 +50,44 @@ public class VolumeService extends Service {
         public void onSensorChanged(SensorEvent e) {
             float x = e.values[0], y = e.values[1], z = e.values[2];
             double g = Math.sqrt(x * x + y * y + z * z) / SensorManager.GRAVITY_EARTH;
-            if (shake.sample(g, SystemClock.elapsedRealtime())) toggleScreen();
+            if (shake.sample(g, SystemClock.elapsedRealtime())) setTorch(!torchOn);
         }
 
         @Override
         public void onAccuracyChanged(Sensor sensor, int accuracy) { }
     };
 
-    @SuppressWarnings("deprecation")
-    private void toggleScreen() {
-        if (power.isInteractive()) {
-            DevicePolicyManager policy = getSystemService(DevicePolicyManager.class);
-            if (policy.isAdminActive(new ComponentName(this, LockAdmin.class))) policy.lockNow();
-        } else {
-            power.newWakeLock(PowerManager.SCREEN_BRIGHT_WAKE_LOCK
-                    | PowerManager.ACQUIRE_CAUSES_WAKEUP, "saltacanciones:pantalla").acquire(3000);
+    private CameraManager camera;
+    private String torchId;        // cámara que tiene flash
+    private boolean torchOn;
+
+    private final CameraManager.TorchCallback torchCallback = new CameraManager.TorchCallback() {
+        @Override
+        public void onTorchModeChanged(String id, boolean enabled) {
+            if (id.equals(torchId)) torchOn = enabled;
+        }
+    };
+
+    private String findTorch() {
+        try {
+            for (String id : camera.getCameraIdList()) {
+                Boolean flash = camera.getCameraCharacteristics(id)
+                        .get(CameraCharacteristics.FLASH_INFO_AVAILABLE);
+                if (Boolean.TRUE.equals(flash)) return id;
+            }
+        } catch (CameraAccessException e) {
+            return null;
+        }
+        return null;
+    }
+
+    private void setTorch(boolean on) {
+        if (torchId == null) return;
+        try {
+            camera.setTorchMode(torchId, on);
+            torchOn = on;
+        } catch (CameraAccessException | IllegalArgumentException e) {
+            // La cámara está en uso por otra app.
         }
     }
 
@@ -76,6 +100,7 @@ public class VolumeService extends Service {
             sensors.registerListener(shakeListener, accelerometer, SensorManager.SENSOR_DELAY_GAME);
         } else {
             sensors.unregisterListener(shakeListener);
+            if (torchOn) setTorch(false);
             cpuLock.release();
         }
         listeningShake = on;
@@ -147,6 +172,9 @@ public class VolumeService extends Service {
         power = getSystemService(PowerManager.class);
         sensors = getSystemService(SensorManager.class);
         cpuLock = power.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "saltacanciones:sensor");
+        camera = getSystemService(CameraManager.class);
+        torchId = findTorch();
+        camera.registerTorchCallback(torchCallback, handler);
         NotificationChannel channel = new NotificationChannel(
                 "servicio", "Servicio activo", NotificationManager.IMPORTANCE_LOW);
         getSystemService(NotificationManager.class).createNotificationChannel(channel);
@@ -178,6 +206,7 @@ public class VolumeService extends Service {
     @Override
     public void onDestroy() {
         setShake(false);
+        camera.unregisterTorchCallback(torchCallback);
         handler.removeCallbacks(resolve);
         unregisterReceiver(receiver);
         super.onDestroy();
