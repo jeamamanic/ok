@@ -29,15 +29,11 @@ import android.view.KeyEvent;
 /** Escucha los cambios del volumen multimedia, también con la pantalla apagada. */
 public class VolumeService extends Service {
     private static final String VOLUME_ACTION = "android.media.VOLUME_CHANGED_ACTION";
-    private static final String EXTRA_STREAM = "android.media.EXTRA_VOLUME_STREAM_TYPE";
-    private static final String EXTRA_NEW = "android.media.EXTRA_VOLUME_STREAM_VALUE";
-    private static final String EXTRA_OLD = "android.media.EXTRA_PREV_VOLUME_STREAM_VALUE";
 
     private final Handler handler = new Handler(Looper.getMainLooper());
     private final DoublePress detector = new DoublePress();
     private AudioManager audio;
     private int volumeBefore;      // volumen antes de la primera pulsación
-    private int ownChange = -1;    // cambio hecho por la app, que se debe ignorar
     private SharedPreferences prefs;
     private PowerManager power;
     private SensorManager sensors;
@@ -96,12 +92,10 @@ public class VolumeService extends Service {
         if (on) {
             Sensor accelerometer = sensors.getDefaultSensor(Sensor.TYPE_ACCELEROMETER);
             if (accelerometer == null) return;
-            cpuLock.acquire();
             sensors.registerListener(shakeListener, accelerometer, SensorManager.SENSOR_DELAY_GAME);
         } else {
             sensors.unregisterListener(shakeListener);
             if (torchOn) setTorch(false);
-            cpuLock.release();
         }
         listeningShake = on;
     }
@@ -118,35 +112,69 @@ public class VolumeService extends Service {
         keepAwayFromLimits();
     };
 
+    private static final long POLL_MS = 40;
+    private int lastVolume;
+    private boolean polling;
+
     private final BroadcastReceiver receiver = new BroadcastReceiver() {
         @Override
         public void onReceive(Context context, Intent intent) {
-            if (intent.getIntExtra(EXTRA_STREAM, -1) != AudioManager.STREAM_MUSIC) return;
-            int now = intent.getIntExtra(EXTRA_NEW, -1);
-            int old = intent.getIntExtra(EXTRA_OLD, -1);
-            if (now < 0 || old < 0 || now == old) return;
-            if (now == ownChange) {
-                ownChange = -1;
-                return;
-            }
-            if (!prefs.getBoolean("volumen", false) || !audio.isMusicActive()) return;
-
-            int dir = now > old ? 1 : -1;
-            long time = SystemClock.elapsedRealtime();
-            detector.press(dir, time);
-            if (detector.count() == 1) volumeBefore = old;
-            handler.removeCallbacks(resolve);
-            handler.postDelayed(resolve, DoublePress.MAX_GAP_MS);
+            checkVolume();
         }
     };
 
+    /** Revisa el volumen sin depender de los avisos, que pueden fallar con la pantalla apagada. */
+    private final Runnable poll = new Runnable() {
+        @Override
+        public void run() {
+            checkVolume();
+            handler.postDelayed(this, POLL_MS);
+        }
+    };
+
+    private void checkVolume() {
+        int now = audio.getStreamVolume(AudioManager.STREAM_MUSIC);
+        int old = lastVolume;
+        if (now == old) return;
+        lastVolume = now;
+        if (!prefs.getBoolean("volumen", false) || !audio.isMusicActive()) return;
+
+        int dir = now > old ? 1 : -1;
+        long time = SystemClock.elapsedRealtime();
+        detector.press(dir, time);
+        if (detector.count() == 1) volumeBefore = old;
+        handler.removeCallbacks(resolve);
+        handler.postDelayed(resolve, DoublePress.MAX_GAP_MS);
+    }
+
+    private void setVolumeGesture(boolean on) {
+        if (on == polling) return;
+        if (on) {
+            lastVolume = audio.getStreamVolume(AudioManager.STREAM_MUSIC);
+            handler.post(poll);
+        } else {
+            handler.removeCallbacks(poll);
+            handler.removeCallbacks(resolve);
+            detector.resolve();
+        }
+        polling = on;
+    }
+
+    /** El procesador debe seguir despierto para detectar gestos con la pantalla apagada. */
+    private void updateWakeLock() {
+        boolean needed = polling || listeningShake;
+        if (needed && !cpuLock.isHeld()) cpuLock.acquire();
+        else if (!needed && cpuLock.isHeld()) cpuLock.release();
+    }
+
     private void setVolume(int value) {
         if (audio.getStreamVolume(AudioManager.STREAM_MUSIC) == value) return;
-        ownChange = value;
         try {
             audio.setStreamVolume(AudioManager.STREAM_MUSIC, value, 0);
+            // Cambio propio: no cuenta como pulsación.
+            lastVolume = audio.getStreamVolume(AudioManager.STREAM_MUSIC);
         } catch (SecurityException e) {
-            ownChange = -1;        // p. ej. con No molestar activo
+            // p. ej. con No molestar activo
         }
     }
 
@@ -199,15 +227,18 @@ public class VolumeService extends Service {
 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
+        setVolumeGesture(prefs.getBoolean("volumen", false));
         setShake(prefs.getBoolean("agitar", false));
+        updateWakeLock();
         return START_STICKY;
     }
 
     @Override
     public void onDestroy() {
         setShake(false);
+        setVolumeGesture(false);
+        updateWakeLock();
         camera.unregisterTorchCallback(torchCallback);
-        handler.removeCallbacks(resolve);
         unregisterReceiver(receiver);
         super.onDestroy();
     }

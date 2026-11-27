@@ -7,6 +7,9 @@ import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
 import android.os.Build;
 import android.os.Bundle;
+import android.net.Uri;
+import android.provider.Settings;
+import android.widget.Button;
 import android.widget.LinearLayout;
 import android.widget.Switch;
 import android.widget.TextView;
@@ -28,6 +31,12 @@ public class MainActivity extends Activity {
         addSwitch(layout, "agitar", "Agitar para la linterna",
                 "Agita 2 veces para encender la linterna y otras 2 para apagarla");
 
+        Button battery = new Button(this);
+        battery.setText("Ajustes de batería (pantalla apagada)");
+        battery.setOnClickListener(v -> startActivity(new Intent(
+                Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                Uri.fromParts("package", getPackageName(), null))));
+        layout.addView(battery);
         setContentView(layout);
 
         if (Build.VERSION.SDK_INT >= 33 && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS)
